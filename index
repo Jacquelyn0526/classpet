@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>幻境灵宠 - 班级游戏化管理系统</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        :root {
+            --primary-bg: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --gold: #fbbf24;
+            --purple: #8b5cf6;
+            --text: #f8fafc;
+        }
+
+        body {
+            margin: 0; font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--primary-bg); color: var(--text); overflow-x: hidden;
+        }
+
+        /* ✨ 全服公告 */
+        .notice-bar {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            z-index: 1000; background: linear-gradient(90deg, transparent, var(--gold), transparent);
+            padding: 2px; min-width: 300px; text-align: center;
+        }
+        .notice-inner { background: #000; color: var(--gold); padding: 8px 20px; font-weight: bold; border-radius: 4px; }
+
+        /* 🔋 班级能量槽 */
+        .energy-section { padding: 20px; max-width: 800px; margin: auto; }
+        .energy-track { height: 12px; background: #334155; border-radius: 6px; overflow: hidden; margin-top: 8px; border: 1px solid rgba(255,255,255,0.1); }
+        .energy-fill { height: 100%; background: linear-gradient(90deg, #6366f1, #ec4899); transition: width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 0 15px #6366f1; }
+
+        /* 🏆 排行榜与列表 */
+        .container { max-width: 800px; margin: auto; padding: 20px; }
+        .rank-item {
+            display: flex; align-items: center; background: var(--card-bg);
+            margin-bottom: 12px; padding: 15px; border-radius: 16px;
+            backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.05);
+            transition: 0.3s;
+        }
+        .guardian-glow { border: 1px solid var(--gold); box-shadow: 0 0 15px rgba(251, 191, 36, 0.3); }
+        
+        .rank-index { font-size: 1.5rem; width: 40px; font-weight: 800; font-style: italic; opacity: 0.8; }
+        .rank-1 { color: var(--gold); }
+
+        /* 🐲 灵宠进化特效 */
+        .pet-icon { font-size: 2.5rem; margin-right: 15px; }
+        .basic-glow { filter: drop-shadow(0 0 8px var(--purple)); }
+        .ultimate-glow { filter: drop-shadow(0 0 15px var(--gold)); animation: breathe 1s infinite alternate; }
+        @keyframes breathe { from { transform: scale(1); } to { transform: scale(1.15); } }
+
+        /* 🛠️ 按钮与交互 */
+        .btn { background: var(--purple); color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        .btn-gold { background: var(--gold); color: black; }
+        .btn:hover { opacity: 0.8; transform: translateY(-1px); }
+
+        /* 📝 登记弹窗 */
+        .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 2000; display: flex; align-items: center; justify-content: center; }
+        .modal { background: #1e293b; padding: 40px; border-radius: 24px; border: 1px solid var(--gold); text-align: center; width: 85%; max-width: 400px; }
+        .magic-input { width: 100%; padding: 12px; margin: 15px 0; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: white; text-align: center; font-size: 1rem; }
+
+        /* 狂欢动画 */
+        .party-mode .rank-item { animation: jump 0.5s infinite; }
+        @keyframes jump { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+
+        .tabs { display: flex; justify-content: center; gap: 15px; margin-bottom: 20px; }
+        .tab { opacity: 0.5; cursor: pointer; padding: 5px 15px; }
+        .tab.active { opacity: 1; border-bottom: 2px solid var(--gold); }
+    </style>
+</head>
+<body :class="{'party-mode': isPartyTime}">
+
+<div id="app">
+    <div class="notice-bar" v-if="notice">
+        <div class="notice-inner">📜 {{ notice }}</div>
+    </div>
+
+    <div class="overlay" v-if="!hasRegistered">
+        <div class="modal">
+            <h2 style="color: var(--gold);">✨ 唤醒灵宠</h2>
+            <p>输入你的名字，缔结幻境契约</p>
+            <input v-model="tempName" class="magic-input" placeholder="你的姓名">
+            <input v-model="tempPetName" class="magic-input" placeholder="灵宠的名字">
+            <button class="btn btn-gold" @click="register" style="width: 100%; padding: 15px;">开启冒险</button>
+        </div>
+    </div>
+
+    <div class="energy-section">
+        <div style="display: flex; justify-content: space-between; font-size: 0.9rem;">
+            <span>✨ 班级集结能量</span>
+            <span>{{ Math.floor(globalEnergy) }}%</span>
+        </div>
+        <div class="energy-track">
+            <div class="energy-fill" :style="{width: globalEnergy + '%'}"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="tabs">
+            <span class="tab" :class="{active: view === 'rank'}" @click="view = 'rank'">🏆 守护者排行</span>
+            <span class="tab" :class="{active: view === 'teacher'}" @click="view = 'teacher'">👨‍🏫 导师神谕</span>
+        </div>
+
+        <div v-if="view === 'rank'">
+            <div v-for="(s, index) in sortedStudents" :key="s.name" 
+                 class="rank-item" :class="{'guardian-glow': index < 3}">
+                <div class="rank-index" :class="'rank-' + (index+1)">{{ index + 1 }}</div>
+                <div class="pet-icon" :class="getMorph(s).effect">{{ getMorph(s).emoji }}</div>
+                <div style="flex-grow: 1;">
+                    <div style="font-weight: bold;">{{ s.name }} <span v-if="index < 3" style="font-size: 0.7rem; color: var(--gold);">[守护者]</span></div>
+                    <div style="font-size: 0.8rem; color: #94a3b8;">{{ s.petName }}</div>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-weight: bold;">Lv.{{ s.level }}</div>
+                    <div style="font-size: 0.7rem; color: var(--purple);">{{ getMorph(s).stage }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="view === 'teacher'">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3>班级事务管理</h3>
+                <button class="btn btn-gold" :disabled="globalEnergy < 100" @click="startParty">🔥 开启狂欢神谕</button>
+            </div>
+            <div v-for="s in students" :key="s.name" class="rank-item" style="padding: 10px 15px;">
+                <div style="flex-grow: 1;">{{ s.name }}</div>
+                <button class="btn" @click="award(s, 1)" style="background: #10b981;">奖励</button>
+                <button class="btn" @click="award(s, -1)" style="background: #ef4444; margin-left: 8px;">惩戒</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const { createApp, ref, computed, watch } = Vue
+
+    createApp({
+        setup() {
+            const view = ref('rank');
+            const notice = ref("");
+            const hasRegistered = ref(false);
+            const tempName = ref("");
+            const tempPetName = ref("");
+            const globalEnergy = ref(45);
+            const isPartyTime = ref(false);
+
+            // 初始数据
+            const students = ref([
+                { name: "张老师", petName: "指引者", level: 99, hasRegistered: true },
+                { name: "李小华", petName: "冰翼", level: 12, hasRegistered: true },
+                { name: "王大锤", petName: "铁头", level: 8, hasRegistered: true }
+            ]);
+
+            // 进化逻辑映射
+            const getMorph = (s) => {
+                if (s.level >= 20) return { emoji: '🐉', stage: '幻兽期', effect: 'ultimate-glow' };
+                if (s.level >= 10) return { emoji: '🦖', stage: '成熟期', effect: 'basic-glow' };
+                return { emoji: '🥚', stage: '幼年期', effect: '' };
+            };
+
+            const sortedStudents = computed(() => {
+                return [...students.value].sort((a,b) => b.level - a.level);
+            });
+
+            // 登记逻辑
+            const register = () => {
+                if(!tempName.value || !tempPetName.value) return alert("请填写完整契约！");
+                students.value.push({
+                    name: tempName.value,
+                    petName: tempPetName.value,
+                    level: 1,
+                    hasRegistered: true
+                });
+                hasRegistered.value = true;
+                sendNotice(`欢迎新守护者【${tempName.value}】降临幻境！`);
+            };
+
+            // 教师操作
+            const award = (s, val) => {
+                s.level += val;
+                if(val > 0) globalEnergy.value = Math.min(100, globalEnergy.value + 5);
+                sendNotice(`导师神谕：${s.name} 获得了灵力提升！`);
+            };
+
+            const startParty = () => {
+                isPartyTime.value = true;
+                globalEnergy.value = 0;
+                students.value.forEach(s => s.level++);
+                sendNotice("🔥 全班狂欢开启！全员等级提升！");
+                setTimeout(() => isPartyTime.value = false, 5000);
+            };
+
+            const sendNotice = (msg) => {
+                notice.value = msg;
+                setTimeout(() => notice.value = "", 4000);
+            };
+
+            // 监听榜首变动
+            watch(() => sortedStudents.value[0]?.name, (newLeader, oldLeader) => {
+                if(oldLeader && newLeader !== oldLeader) {
+                    sendNotice(`🏆 荣耀更替！【${newLeader}】成为了新的最强守护者！`);
+                }
+            });
+
+            return { view, notice, hasRegistered, tempName, tempPetName, globalEnergy, isPartyTime, students, sortedStudents, getMorph, register, award, startParty }
+        }
+    }).mount('#app')
+</script>
+</body>
+</html>
